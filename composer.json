@@ -2,7 +2,6 @@
   "name": "my-php-app",
   "description": "A PHP application on Heroku",
   "require": {
-    "php": "^7.4",
-    "heroku-php-apache2": "*"
+    "php": "^7.4"
   }
 }

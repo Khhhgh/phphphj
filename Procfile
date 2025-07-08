@@ -1,1 +1,1 @@
-web: php kindi.php
+web: heroku-php-apache2 kindi.php

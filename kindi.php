@@ -1,30 +1,27 @@
 <?php
-echo "Bot is running";
-?>
-
-<?php
+echo "✅ Bot is running!";
 flush();
 ob_start();
+
 ##########
 $token = "7362214073:AAHfJS5mh7O2xDPTvfVKU3ix35prCeZxgfc"; // توكنك
-$kindi = " 7362214073:AAHfJS5mh7O2xDPTvfVKU3ix35prCeZxgfc";// توكنك
+$kindi = "7362214073:AAHfJS5mh7O2xDPTvfVKU3ix35prCeZxgfc";// توكنك
 
 $buy = "AIikindi";
-$userbot ="Vcfgfxygfvbot";
-$sudo = "5422153027"; // ايديك
+$userbot = "Vcfgfxygfvbot";
+$sudo = "8011996271"; // ايديك
 $admin = "$sudo";
-$idBot = "7362214073";// ايدي بوتك
+$idBot = "7362214073"; // ايدي بوتك
 $admmm = $sudo;
 $ADMIN = $sudo;
-$Dev = array("$sudo","8011996271");// ايديك
+$Dev = array("$sudo","8011996271"); // ايديك
 $Devd = "$sudo";
-$tbbots = Vcfgfxygfvbot;/// يوزر بوتك بدون @
- 
-$channel = "mojgghhh";/// يوزر قناتك بدون@
+$tbbots = "Vcfgfxygfvbot"; // يوزر بوتك بدون @
+$channel = "mojgghhh"; // يوزر قناتك بدون @
 $chinnl = "$channel";
-$DevUser = "@$buy"; // 
-$Devch = "@$buy"; //  
-$Userbot = "$tbbots"; // 
+$DevUser = "@$buy";
+$Devch = "@$buy";
+$Userbot = "$tbbots";
 //~~~~~~~~//
 define('API_KEY',$token);
 echo "setWebhook ~> <a href=\"https://api.telegram.org/bot".API_KEY."/setwebhook?url=".$_SERVER['SERVER_NAME']."".$_SERVER['SCRIPT_NAME']."\">https://api.telegram.org/bot".API_KEY."/setwebhook?url=".$_SERVER['SERVER_NAME']."".$_SERVER['SCRIPT_NAME']."</a>";

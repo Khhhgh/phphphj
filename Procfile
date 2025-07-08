@@ -1,1 +1,1 @@
-web: heroku-php-apache2 kindi.php
+web: vendor/bin/heroku-php-apache2

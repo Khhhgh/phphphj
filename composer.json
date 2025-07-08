@@ -1,5 +1,5 @@
 {
-  "name": "toto6/my-php-app",  // اسم صالح
+  "name": "toto6/my-php-app",
   "description": "A PHP application on Heroku",
   "require": {
     "php": "^7.4"

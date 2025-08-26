@@ -5,6 +5,7 @@ import requests
 from io import BytesIO
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -22,7 +23,9 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.binary_location = os.environ.get("GOOGLE_CHROME_BIN")
 
-driver = webdriver.Chrome(executable_path=os.environ.get("CHROMEDRIVER_PATH"), options=chrome_options)
+# استخدام Service لتجنب خطأ executable_path
+service = Service(executable_path=os.environ.get("CHROMEDRIVER_PATH"))
+driver = webdriver.Chrome(service=service, options=chrome_options)
 
 @bot.message_handler(func=lambda message: True)
 def download_instagram(message):

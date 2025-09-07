@@ -1,27 +1,43 @@
 import telebot
 from telebot import types
+import json
+import os
+import random
 import threading
 import time
-import random
-from firebase_init import *  # استدعاء كل دوال ومتغيرات Firebase
 
 # -------- إعدادات البوت --------
-BOT_TOKEN = "توكن_البوت_هنا"  # ضع توكن البوت
-OWNER_ID = 123456789  # ضع معرف المالك هنا
+BOT_TOKEN = "7432842437:AAFfcMPNfHyB6JkwStp-_21pfewxyCmf01c"
+OWNER_ID = 123456789  # ضع هنا معرف مالك البوت
 bot = telebot.TeleBot(BOT_TOKEN)
+
+# -------- قاعدة البيانات --------
+DB_FILE = "channels.json"
+if os.path.exists(DB_FILE):
+    with open(DB_FILE, "r") as f:
+        db = json.load(f)
+else:
+    db = {"users": {}}
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f, indent=4)
+
+def save_db():
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f, indent=4)
 
 # -------- متغيرات مساعدة --------
 user_add_channel = {}
 active_pairs = {}
 completed_checks = {}
 active_users = set()
+mandatory_channel = None
 
 # -------- أزرار --------
 def main_menu(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("أضف قناة", "حذف قناة")
     markup.add("الاشتراك بالقنوات", "تعليمات البوت")
-    if int(user_id) == OWNER_ID:
+    if user_id == OWNER_ID:
         markup.add("📢 اذاعة", "إعدادات البوت", "إضافة قناة إجبارية")
     return markup
 
@@ -30,14 +46,15 @@ def back_button():
     markup.add("رجوع")
     return markup
 
-# -------- تسجيل أي مستخدم نشط --------
+# -------- تسجيل أي مستخدم نشط فور أي رسالة --------
 @bot.message_handler(func=lambda m: True)
 def ensure_active_user(message):
     user_id = str(message.chat.id)
     if user_id not in active_users:
         active_users.add(user_id)
-    if not user_exists(user_id):
-        add_user(user_id)
+    if user_id not in db["users"]:
+        db["users"][user_id] = []
+        save_db()
         bot.send_message(OWNER_ID, f"👤 مستخدم جديد دخل البوت:\nID: {user_id}\nالاسم: {message.from_user.first_name}\n@{message.from_user.username}")
 
 # -------- /start --------
@@ -73,41 +90,18 @@ def receive_channel(message):
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ خطأ: {e}")
             return
-
-        add_channel(user_id, channel)
+        if user_id not in db["users"]:
+            db["users"][user_id] = []
+        if channel in db["users"][user_id]:
+            bot.send_message(message.chat.id, "⚠️ القناة مضافة مسبقاً.")
+            return
+        db["users"][user_id].append(channel)
+        save_db()
         user_add_channel.pop(message.chat.id)
         bot.send_message(message.chat.id, f"✅ تم إضافة قناتك: {channel}", reply_markup=main_menu(message.chat.id))
 
-# -------- إضافة قناة إجبارية للمالك --------
-@bot.message_handler(func=lambda m: m.text == "إضافة قناة إجبارية" and m.chat.id == OWNER_ID)
-def add_mandatory_channel(message):
-    bot.send_message(message.chat.id, "📩 أرسل رابط القناة الإجبارية للمستخدمين (مثال: @mustsub)", reply_markup=back_button())
-    user_add_channel[message.chat.id] = "mandatory_channel"
-
-@bot.message_handler(func=lambda m: m.chat.id in user_add_channel)
-def receive_mandatory_channel(message):
-    action = user_add_channel.get(message.chat.id)
-    if action == "mandatory_channel":
-        if message.text == "رجوع":
-            user_add_channel.pop(message.chat.id)
-            bot.send_message(message.chat.id, "تم الإلغاء", reply_markup=main_menu(message.chat.id))
-            return
-        channel = message.text.strip()
-        try:
-            chat_member = bot.get_chat_member(channel, bot.get_me().id)
-            if chat_member.status not in ["administrator", "creator"]:
-                bot.send_message(message.chat.id, "❌ يجب رفع البوت أدمن في القناة قبل الإضافة.")
-                return
-        except Exception as e:
-            bot.send_message(message.chat.id, f"⚠️ خطأ: {e}")
-            return
-        set_mandatory_channel(channel)
-        user_add_channel.pop(message.chat.id)
-        bot.send_message(message.chat.id, f"✅ تم تعيين القناة الإجبارية: {channel}", reply_markup=main_menu(message.chat.id))
-
-# -------- الاشتراك بالقنوات مع تحقق الاشتراك الإجباري --------
+# -------- الاشتراك بالقنوات --------
 def check_mandatory(user_id):
-    mandatory_channel = get_mandatory_channel()
     if not mandatory_channel:
         return True
     try:
@@ -117,10 +111,15 @@ def check_mandatory(user_id):
         return False
 
 def start_exchange(user_id):
-    all_users = get_all_users()
-    available_users = [uid for uid in all_users
-                       if uid != user_id
-                       and get_user_channels(uid)
+    for uid in list(active_pairs.keys()):
+        pid = active_pairs[uid]
+        key = f"{uid}_{pid}"
+        if completed_checks.get(key):
+            active_pairs.pop(uid)
+    available_users = [uid for uid in db["users"] 
+                       if uid != user_id 
+                       and uid in active_users
+                       and db["users"][uid] 
                        and uid not in active_pairs.values()]
     if not available_users:
         bot.send_message(int(user_id), "⏳ لا توجد قنوات متاحة حالياً، حاول لاحقاً.")
@@ -128,9 +127,8 @@ def start_exchange(user_id):
     partner_id = random.choice(available_users)
     active_pairs[user_id] = partner_id
     active_pairs[partner_id] = user_id
-
-    user_channel = get_user_channels(user_id)[0]
-    partner_channel = get_user_channels(partner_id)[0]
+    user_channel = db["users"][user_id][0]
+    partner_channel = db["users"][partner_id][0]
 
     markup = types.InlineKeyboardMarkup()
     btn_user_sub = types.InlineKeyboardButton("🔗 اشترك في القناة الأخرى", url=f"https://t.me/{partner_channel.strip('@')}")
@@ -147,13 +145,11 @@ def start_exchange(user_id):
 @bot.message_handler(func=lambda m: m.text == "الاشتراك بالقنوات")
 def subscribe_channels(message):
     user_id = str(message.chat.id)
-    if not get_user_channels(user_id):
+    if user_id not in db["users"] or not db["users"][user_id]:
         bot.send_message(message.chat.id, "⚠️ يجب إضافة قناة أولاً قبل بدء التبادل.", reply_markup=main_menu(message.chat.id))
         return
     if not check_mandatory(user_id):
-        bot.send_message(message.chat.id,
-                         f"⚠️ يجب الاشتراك أولاً بالقناة الإلزامية: @{get_mandatory_channel()}",
-                         reply_markup=main_menu(message.chat.id))
+        bot.send_message(message.chat.id, f"⚠️ يجب الاشتراك أولاً بالقناة الإلزامية: @{mandatory_channel}", reply_markup=main_menu(message.chat.id))
         return
     start_exchange(user_id)
 
@@ -167,7 +163,7 @@ def check_subscription(call):
         bot.answer_callback_query(call.id, "تم التحقق مسبقًا.")
         return
     try:
-        partner_channel = get_user_channels(partner_id)[0]
+        partner_channel = db["users"][partner_id][0]
         user_member = bot.get_chat_member(partner_channel, int(user_id))
         if user_member.status not in ["member", "creator", "administrator"]:
             bot.answer_callback_query(call.id, "❌ يجب الاشتراك أولاً")
@@ -190,7 +186,6 @@ def next_exchange(call):
     if not completed_checks.get(key):
         bot.answer_callback_query(call.id, "❌ يجب التحقق من الاشتراك قبل الضغط التالي.")
         return
-    # -------- إزالة الزوج الحالي من القوائم النشطة --------
     active_pairs.pop(user_id, None)
     active_pairs.pop(partner_id, None)
     completed_checks.pop(key, None)
@@ -205,8 +200,8 @@ def monitor_leave():
             if not partner_id:
                 continue
             try:
-                user_channels = get_user_channels(user_id)
-                partner_channels = get_user_channels(partner_id)
+                user_channels = db["users"].get(user_id, [])
+                partner_channels = db["users"].get(partner_id, [])
                 if not user_channels or not partner_channels:
                     continue
                 user_channel = user_channels[0]
@@ -237,12 +232,10 @@ def monitor_leave():
                     active_pairs.pop(user_id, None)
                     active_pairs.pop(partner_id, None)
                     completed_checks.pop(f"{user_id}_{partner_id}", None)
-
             except:
                 continue
         time.sleep(30)
 
-# تشغيل مراقبة المغادرة في خيط مستقل
 threading.Thread(target=monitor_leave, daemon=True).start()
 
 # -------- تشغيل البوت --------

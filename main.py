@@ -8,7 +8,7 @@ import time
 
 # -------- إعدادات البوت --------
 BOT_TOKEN = "7432842437:AAFfcMPNfHyB6JkwStp-_21pfewxyCmf01c"
-OWNER_ID = 1310488710  # ضع هنا معرف مالك البوت
+OWNER_ID = 123456789  # ضع هنا معرف مالك البوت
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # -------- قاعدة البيانات --------
@@ -53,9 +53,16 @@ def back_button():
     markup.add("رجوع")
     return markup
 
-# -------- تسجيل أي مستخدم نشط --------
+# -------- تسجيل أي مستخدم نشط (آمن) --------
 @bot.message_handler(func=lambda m: True)
 def ensure_active_user(message):
+    # تجاهل الرسائل الخاصة بالأوامر أو الأزرار
+    commands_and_buttons = [
+        "/start", "أضف قناة", "حذف قناة", "الاشتراك بالقنوات", "تعليمات البوت",
+        "📢 اذاعة", "إعدادات البوت", "إضافة قناة إجبارية", "رجوع"
+    ]
+    if message.text in commands_and_buttons:
+        return
     user_id = str(message.chat.id)
     if user_id not in active_users:
         active_users.add(user_id)

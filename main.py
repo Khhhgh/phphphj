@@ -172,7 +172,7 @@ def check_sub(c):
         ch = random.choice(partner_channels)
         member = bot.get_chat_member(ch,int(uid))
         if member.status not in ["member","creator","administrator"]:
-            db.setdefault("banned",{})[uid] = time.time() + 86400
+            db.setdefault("banned",{})[uid] = time.time() + 900
             save_db()
             bot.answer_callback_query(c.id,"❌ لم تشترك، تم حظرك لمدة 24 ساعة")
             with lock:

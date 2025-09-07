@@ -1,309 +1,206 @@
-import telebot
+import telebot, threading, time, random, json, os
 from telebot import types
-import json
-import os
-import random
-import threading
-import time
 
 # -------- إعدادات البوت --------
 BOT_TOKEN = "7432842437:AAFfcMPNfHyB6JkwStp-_21pfewxyCmf01c"
-OWNER_ID = 1310488710  # ضع هنا معرف مالك البوت
+OWNER_ID = 1310488710
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# -------- قاعدة البيانات --------
 DB_FILE = "channels.json"
+lock = threading.Lock()
+
+# -------- بيانات التشغيل --------
+user_add_channel = {}
+queue = []
+active_pairs = {}
+completed_exchanges = {}  # سجل التبادلات لكل زوج
+last_channel_used = {}     # لتجنب تكرار نفس القناة للشريك نفسه
+
+# -------- تحميل / حفظ قاعدة البيانات --------
 if os.path.exists(DB_FILE):
     with open(DB_FILE, "r") as f:
         db = json.load(f)
 else:
-    db = {"users": {}}
+    db = {"users": {}, "banned": {}}
     with open(DB_FILE, "w") as f:
-        json.dump(db, f, indent=4)
+        json.dump(db,f,indent=4)
 
 def save_db():
-    with open(DB_FILE, "w") as f:
-        json.dump(db, f, indent=4)
+    with open(DB_FILE,"w") as f:
+        json.dump(db,f,indent=4)
 
-# -------- متغيرات مساعدة --------
-user_add_channel = {}
-active_pairs = {}
-completed_checks = {}
-active_users = set()
-mandatory_channel = None  # القناة الإلزامية
-
-# -------- دالة إرسال آمن --------
-def safe_send(user_id, text, reply_markup=None):
-    try:
-        bot.send_message(int(user_id), text, reply_markup=reply_markup)
-    except Exception as e:
-        print(f"⚠️ خطأ عند إرسال رسالة للمستخدم {user_id}: {e}")
-
-# -------- أزرار --------
-def main_menu(user_id):
+# -------- أزرار رئيسية --------
+def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("أضف قناة", "حذف قناة")
-    markup.add("الاشتراك بالقنوات", "تعليمات البوت")
-    if user_id == OWNER_ID:
-        markup.add("📢 اذاعة", "إعدادات البوت", "إضافة قناة إجبارية")
+    markup.add("➕ أضف قناة","❌ حذف قناة")
+    markup.add("🔗 الاشتراك بالقنوات")
     return markup
 
 def back_button():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("رجوع")
-    return markup
-
-# -------- تسجيل أي مستخدم نشط (آمن) --------
-@bot.message_handler(func=lambda m: True)
-def ensure_active_user(message):
-    # تجاهل الرسائل الخاصة بالأوامر أو الأزرار
-    commands_and_buttons = [
-        "/start", "أضف قناة", "حذف قناة", "الاشتراك بالقنوات", "تعليمات البوت",
-        "📢 اذاعة", "إعدادات البوت", "إضافة قناة إجبارية", "رجوع"
-    ]
-    if message.text in commands_and_buttons:
-        return
-    user_id = str(message.chat.id)
-    if user_id not in active_users:
-        active_users.add(user_id)
-    if user_id not in db["users"]:
-        db["users"][user_id] = []
-        save_db()
-        safe_send(OWNER_ID, f"👤 مستخدم جديد دخل البوت:\nID: {user_id}\nالاسم: {message.from_user.first_name}\n@{message.from_user.username}")
+    return types.ReplyKeyboardMarkup(resize_keyboard=True).add("رجوع")
 
 # -------- /start --------
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_name = message.from_user.first_name
-    safe_send(message.chat.id,
-              f"👋 مرحباً {user_name}!\nاضغط على الأزرار لاختيار الإجراء.",
-              reply_markup=main_menu(message.chat.id))
+    bot.send_message(message.chat.id, f"👋 مرحباً {message.from_user.first_name}!\nاختر إجراء:", reply_markup=main_menu())
 
-# -------- أضف قناة --------
-@bot.message_handler(func=lambda m: m.text == "أضف قناة")
-def add_channel_prompt(message):
-    safe_send(message.chat.id, "📩 أرسل رابط قناتك (مثال: @mychannel)\n⚠️ يجب رفع البوت أدمن أولاً!", reply_markup=back_button())
-    user_add_channel[message.chat.id] = "add_channel"
+    # إشعار للمالك عند دخول مستخدم جديد
+    user_id = str(message.chat.id)
+    if user_id not in db["users"]:
+        db["users"][user_id] = []
+        save_db()
+        bot.send_message(OWNER_ID,
+            f"👤 مستخدم جديد دخل البوت:\n"
+            f"ID: {user_id}\n"
+            f"الاسم: {message.from_user.first_name}\n"
+            f"@{message.from_user.username}")
 
-# -------- إضافة قناة إجبارية للمالك --------
-@bot.message_handler(func=lambda m: m.text == "إضافة قناة إجبارية" and m.chat.id == OWNER_ID)
-def set_mandatory_channel(message):
-    safe_send(message.chat.id, "📩 أرسل رابط القناة الإلزامية (مثال: @mandatorychannel)", reply_markup=back_button())
-    user_add_channel[message.chat.id] = "mandatory_channel"
+# -------- إضافة قناة مع تحقق من صحتها --------
+@bot.message_handler(func=lambda m: m.text=="➕ أضف قناة")
+def add_channel(m):
+    bot.send_message(m.chat.id,"📩 أرسل رابط القناة (مثال: @mychannel):",reply_markup=back_button())
+    db["users"].setdefault(str(m.chat.id), [])
+    user_add_channel[m.chat.id] = "add_channel"
+
+@bot.message_handler(func=lambda m: m.chat.id in user_add_channel)
+def receive_channel(m):
+    uid = str(m.chat.id)
+    if m.text=="رجوع":
+        user_add_channel.pop(m.chat.id,None)
+        bot.send_message(m.chat.id,"تم الإلغاء",reply_markup=main_menu())
+        return
+    
+    channel = m.text.strip()
+    
+    try:
+        # تحقق من وجود القناة على تيليجرام
+        chat = bot.get_chat(channel)
+        # تحقق من أن البوت مشرف فيها
+        member = bot.get_chat_member(channel, bot.get_me().id)
+        if member.status not in ["administrator","creator"]:
+            bot.send_message(m.chat.id,"❌ يجب رفع البوت أدمن في القناة أولاً")
+            return
+    except Exception as e:
+        bot.send_message(m.chat.id,f"⚠️ القناة غير صحيحة أو لا يمكن الوصول إليها: {e}")
+        return
+
+    if channel in db["users"][uid]:
+        bot.send_message(m.chat.id,"⚠️ القناة موجودة مسبقاً",reply_markup=main_menu())
+        return
+    
+    db["users"][uid].append(channel)
+    save_db()
+    bot.send_message(m.chat.id,f"✅ تمت إضافة القناة: {channel}",reply_markup=main_menu())
+    user_add_channel.pop(m.chat.id,None)
+    with lock:
+        if uid not in queue and uid not in active_pairs: queue.append(uid)
 
 # -------- حذف قناة --------
-@bot.message_handler(func=lambda m: m.text == "حذف قناة")
-def delete_channel_prompt(message):
-    user_id = str(message.chat.id)
-    if user_id not in db["users"] or not db["users"][user_id]:
-        safe_send(message.chat.id, "⚠️ لا توجد قنوات لحذفها.", reply_markup=main_menu(message.chat.id))
-        return
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for ch in db["users"][user_id]:
-        markup.add(ch)
+@bot.message_handler(func=lambda m: m.text=="❌ حذف قناة")
+def delete_channel(m):
+    uid = str(m.chat.id)
+    chans = db["users"].get(uid,[])
+    if not chans: bot.send_message(m.chat.id,"لا توجد قنوات",reply_markup=main_menu()); return
+    markup=types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in chans: markup.add(c)
     markup.add("رجوع")
-    user_add_channel[message.chat.id] = "delete_channel"
-    safe_send(message.chat.id, "اختر القناة التي تريد حذفها:", reply_markup=markup)
+    bot.send_message(m.chat.id,"اختر قناة للحذف:",reply_markup=markup)
+    user_add_channel[m.chat.id] = "delete_channel"
 
-# -------- استقبال أي قناة (إضافة/حذف/إلزامية) --------
-@bot.message_handler(func=lambda m: m.chat.id in user_add_channel)
-def handle_channel_actions(message):
-    user_id = str(message.chat.id)
-    action = user_add_channel.get(message.chat.id)
-
-    if message.text == "رجوع":
-        user_add_channel.pop(message.chat.id)
-        safe_send(message.chat.id, "تم الإلغاء", reply_markup=main_menu(message.chat.id))
-        return
-
-    if action == "add_channel":
-        channel = message.text.strip()
-        try:
-            chat_member = bot.get_chat_member(channel, bot.get_me().id)
-            if chat_member.status not in ["administrator", "creator"]:
-                safe_send(message.chat.id, "❌ يجب رفع البوت أدمن في القناة قبل الإضافة.")
-                return
-        except Exception as e:
-            safe_send(message.chat.id, f"⚠️ خطأ: {e}")
-            return
-        if user_id not in db["users"]:
-            db["users"][user_id] = []
-        if channel in db["users"][user_id]:
-            safe_send(message.chat.id, "⚠️ القناة مضافة مسبقاً.")
-            return
-        db["users"][user_id].append(channel)
-        save_db()
-        user_add_channel.pop(message.chat.id)
-        safe_send(message.chat.id, f"✅ تم إضافة قناتك: {channel}", reply_markup=main_menu(message.chat.id))
-
-    elif action == "mandatory_channel" and message.chat.id == OWNER_ID:
-        global mandatory_channel
-        channel = message.text.strip()
-        try:
-            chat_member = bot.get_chat_member(channel, bot.get_me().id)
-            if chat_member.status not in ["administrator", "creator"]:
-                safe_send(message.chat.id, "❌ يجب رفع البوت أدمن في القناة قبل الإضافة.")
-                return
-        except Exception as e:
-            safe_send(message.chat.id, f"⚠️ خطأ: {e}")
-            return
-        mandatory_channel = channel
-        user_add_channel.pop(message.chat.id)
-        safe_send(message.chat.id, f"✅ تم تعيين القناة الإلزامية: {channel}", reply_markup=main_menu(message.chat.id))
-
-    elif action == "delete_channel":
-        if message.text in db["users"].get(user_id, []):
-            db["users"][user_id].remove(message.text)
-            save_db()
-            safe_send(message.chat.id, f"✅ تم حذف القناة: {message.text}", reply_markup=main_menu(message.chat.id))
-        else:
-            safe_send(message.chat.id, "⚠️ القناة غير موجودة.", reply_markup=main_menu(message.chat.id))
-        user_add_channel.pop(message.chat.id)
-
-# -------- التحقق من الاشتراك بالقناة الإلزامية --------
-def check_mandatory(user_id):
-    if not mandatory_channel:
-        return True
-    try:
-        member = bot.get_chat_member(mandatory_channel, int(user_id))
-        return member.status in ["member", "creator", "administrator"]
-    except:
-        return False
-
-# -------- بدء التبادل --------
-def start_exchange(user_id):
-    for uid in list(active_pairs.keys()):
-        pid = active_pairs[uid]
-        key = f"{uid}_{pid}"
-        if completed_checks.get(key):
-            active_pairs.pop(uid)
-    available_users = [uid for uid in db["users"] 
-                       if uid != user_id 
-                       and uid in active_users
-                       and db["users"][uid] 
-                       and uid not in active_pairs.values()]
-    if not available_users:
-        safe_send(user_id, "⏳ لا توجد قنوات متاحة حالياً، حاول لاحقاً.")
-        return
-    partner_id = random.choice(available_users)
-    active_pairs[user_id] = partner_id
-    active_pairs[partner_id] = user_id
-    user_channel = db["users"][user_id][0]
-    partner_channel = db["users"][partner_id][0]
-
-    markup = types.InlineKeyboardMarkup()
-    btn_user_sub = types.InlineKeyboardButton("🔗 اشترك في القناة الأخرى", url=f"https://t.me/{partner_channel.strip('@')}")
-    btn_partner_sub = types.InlineKeyboardButton("🔗 اشترك في قناتك", url=f"https://t.me/{user_channel.strip('@')}")
-    btn_check = types.InlineKeyboardButton("✅ تحقق الاشتراك", callback_data=f"check_{user_id}_{partner_id}")
-    btn_next = types.InlineKeyboardButton("⏭ التالي", callback_data=f"next_{user_id}")
-    markup.add(btn_user_sub, btn_partner_sub)
-    markup.add(btn_check, btn_next)
-
-    safe_send(user_id,
-              f"تم اختيار قناة للتبادل:\n\nقناة الآخر: @{partner_channel}\nقناتك: @{user_channel}",
-              reply_markup=markup)
+@bot.message_handler(func=lambda m: m.chat.id in user_add_channel and user_add_channel[m.chat.id]=="delete_channel")
+def remove_channel(m):
+    uid = str(m.chat.id)
+    if m.text=="رجوع": user_add_channel.pop(m.chat.id,None); bot.send_message(m.chat.id,"تم الإلغاء",reply_markup=main_menu()); return
+    if m.text in db["users"].get(uid,[]):
+        db["users"][uid].remove(m.text); save_db()
+        bot.send_message(m.chat.id,f"✅ تم حذف: {m.text}",reply_markup=main_menu())
+    else: bot.send_message(m.chat.id,"⚠️ القناة غير موجودة",reply_markup=main_menu())
+    user_add_channel.pop(m.chat.id,None)
 
 # -------- الاشتراك بالقنوات --------
-@bot.message_handler(func=lambda m: m.text == "الاشتراك بالقنوات")
-def subscribe_channels(message):
-    user_id = str(message.chat.id)
-    if user_id not in db["users"] or not db["users"][user_id]:
-        safe_send(message.chat.id, "⚠️ يجب إضافة قناة أولاً قبل بدء التبادل.", reply_markup=main_menu(message.chat.id))
+@bot.message_handler(func=lambda m: m.text=="🔗 الاشتراك بالقنوات")
+def start_exchange(m):
+    uid = str(m.chat.id)
+    banned_until = db.get("banned",{}).get(uid,0)
+    if time.time() < banned_until:
+        remaining = int((banned_until - time.time())/60)
+        bot.send_message(m.chat.id,f"❌ تم حظرك من التبادل.\n⏳ تبقى {remaining} دقيقة",reply_markup=main_menu())
         return
-    if not check_mandatory(user_id):
-        safe_send(message.chat.id, f"⚠️ يجب الاشتراك أولاً بالقناة الإلزامية: @{mandatory_channel}", reply_markup=main_menu(message.chat.id))
-        return
-    start_exchange(user_id)
+    elif uid in db.get("banned",{}):
+        db["banned"].pop(uid)
+        save_db()
 
-# -------- تحقق الاشتراك صارم --------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("check_"))
-def check_subscription(call):
-    parts = call.data.split("_")
-    user_id, partner_id = parts[1], parts[2]
-    key = f"{user_id}_{partner_id}"
-    if completed_checks.get(key):
-        bot.answer_callback_query(call.id, "تم التحقق مسبقًا.")
-        return
+    if not db["users"].get(uid):
+        bot.send_message(m.chat.id,"⚠️ أضف قناة أولاً",reply_markup=main_menu()); return
+
+    with lock:
+        if uid not in queue and uid not in active_pairs:
+            queue.append(uid)
+            bot.send_message(m.chat.id, "⏳ تم إضافتك لقائمة الانتظار، سيتم بدء التبادل عند توفر شريك.", reply_markup=main_menu())
+        match_partners()
+
+def match_partners():
+    while len(queue) >= 2:
+        u1, u2 = queue.pop(0), queue.pop(0)
+        active_pairs[u1] = u2
+        active_pairs[u2] = u1
+        completed_exchanges.pop((u1,u2),None)
+        completed_exchanges.pop((u2,u1),None)
+        send_exchange(u1,u2)
+        send_exchange(u2,u1)
+
+def send_exchange(uid,partner):
+    partner_channels = db["users"].get(partner,["@example"])
+    last_used = last_channel_used.get((uid,partner))
+    available = [ch for ch in partner_channels if ch != last_used]
+    if not available: available = partner_channels
+    ch = random.choice(available)
+    last_channel_used[(uid,partner)] = ch
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔗 قناة الشريك",url=f"https://t.me/{ch.strip('@')}"))
+    markup.add(types.InlineKeyboardButton("✅ تحقق الاشتراك",callback_data=f"check_{uid}_{partner}"))
+    markup.add(types.InlineKeyboardButton("⏭ التالي",callback_data=f"next_{uid}"))
+    bot.send_message(int(uid),f"🔁 تبادل:\nقناة الشريك: @{ch}",reply_markup=markup)
+
+# -------- تحقق الاشتراك --------
+@bot.callback_query_handler(func=lambda c:c.data.startswith("check_"))
+def check_sub(c):
+    _,uid,partner=c.data.split("_")
     try:
-        partner_channel = db["users"][partner_id][0]
-        try:
-            user_member = bot.get_chat_member(partner_channel, int(user_id))
-            if user_member.status not in ["member", "creator", "administrator"]:
-                bot.answer_callback_query(call.id, "❌ يجب الاشتراك أولاً")
-                return
-        except:
-            bot.answer_callback_query(call.id, "❌ المستخدم لم يشترك أو لا يمكن التحقق.")
+        partner_channels = db["users"].get(partner,["@example"])
+        ch = random.choice(partner_channels)
+        member = bot.get_chat_member(ch,int(uid))
+        if member.status not in ["member","creator","administrator"]:
+            db.setdefault("banned",{})[uid] = time.time() + 86400
+            save_db()
+            bot.answer_callback_query(c.id,"❌ لم تشترك، تم حظرك لمدة 24 ساعة")
+            with lock:
+                queue[:] = [x for x in queue if x != uid]
+                pid = active_pairs.pop(uid,None)
+                if pid: active_pairs.pop(pid,None)
             return
-        completed_checks[key] = True
-        bot.answer_callback_query(call.id, "✅ تم التحقق من الاشتراك!")
-        safe_send(partner_id, f"🔔 المستخدم @{call.from_user.username} اشترك في قناتك: @{partner_channel}")
-    except Exception as e:
-        bot.answer_callback_query(call.id, f"⚠️ خطأ: {e}")
+        completed_exchanges[(uid,partner)] = True
+        bot.answer_callback_query(c.id,"✅ تم الاشتراك!")
+    except:
+        bot.answer_callback_query(c.id,"⚠️ خطأ تحقق الاشتراك")
 
-# -------- زر التالي --------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("next_"))
-def next_exchange(call):
-    user_id = call.data.split("_")[1]
-    if user_id not in active_pairs:
-        bot.answer_callback_query(call.id, "⚠️ لا يوجد زوج نشط حالياً.")
-        return
-    partner_id = active_pairs[user_id]
-    key = f"{user_id}_{partner_id}"
-    if not completed_checks.get(key):
-        bot.answer_callback_query(call.id, "❌ يجب التحقق من الاشتراك قبل الضغط التالي.")
-        return
-    active_pairs.pop(user_id, None)
-    active_pairs.pop(partner_id, None)
-    completed_checks.pop(key, None)
-    bot.answer_callback_query(call.id, "⏭ جاري اختيار قناة جديدة...")
-    start_exchange(user_id)
-
-# -------- مراقبة المغادرة فعلية --------
-def monitor_leave():
-    while True:
-        for user_id in list(active_pairs.keys()):
-            partner_id = active_pairs.get(user_id)
-            if not partner_id:
-                continue
-            try:
-                user_channels = db["users"].get(user_id, [])
-                partner_channels = db["users"].get(partner_id, [])
-                if not user_channels or not partner_channels:
-                    continue
-                user_channel = user_channels[0]
-                partner_channel = partner_channels[0]
-
-                try:
-                    user_member = bot.get_chat_member(partner_channel, int(user_id))
-                    user_in_partner = user_member.status in ["member", "creator", "administrator"]
-                except:
-                    user_in_partner = False
-
-                try:
-                    partner_member = bot.get_chat_member(user_channel, int(partner_id))
-                    partner_in_user = partner_member.status in ["member", "creator", "administrator"]
-                except:
-                    partner_in_user = False
-
-                if not user_in_partner:
-                    safe_send(partner_id,
-                              f"⚠️ المستخدم @{user_id} غادر قناتك @{partner_channel}.\nقناته الخاصة: @{user_channel}")
-                    active_pairs.pop(user_id, None)
-                    active_pairs.pop(partner_id, None)
-                    completed_checks.pop(f"{user_id}_{partner_id}", None)
-
-                if not partner_in_user:
-                    safe_send(user_id,
-                              f"⚠️ المستخدم @{partner_id} غادر قناتك @{user_channel}.\nقناته الخاصة: @{partner_channel}")
-                    active_pairs.pop(user_id, None)
-                    active_pairs.pop(partner_id, None)
-                    completed_checks.pop(f"{user_id}_{partner_id}", None)
-            except:
-                continue
-        time.sleep(30)
-
-threading.Thread(target=monitor_leave, daemon=True).start()
+# -------- التالي --------
+@bot.callback_query_handler(func=lambda c:c.data.startswith("next_"))
+def next_exchange(c):
+    uid = c.data.split("_")[1]
+    partner = active_pairs.get(uid)
+    if not partner: bot.answer_callback_query(c.id,"⚠️ لا يوجد شريك"); return
+    if not completed_exchanges.get((uid,partner)):
+        bot.answer_callback_query(c.id,"❌ تحقق الاشتراك أولاً"); return
+    with lock:
+        active_pairs.pop(uid,None)
+        active_pairs.pop(partner,None)
+        completed_exchanges.pop((uid,partner),None)
+        queue.append(uid)
+        queue.append(partner)
+    bot.answer_callback_query(c.id,"⏭ جاري اختيار شريك جديد...")
+    match_partners()
 
 # -------- تشغيل البوت --------
-bot.infinity_polling()
+bot.infinity_polling(timeout=10, long_polling_timeout=5)

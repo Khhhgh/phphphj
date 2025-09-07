@@ -1,7 +1,0 @@
-{
-  "name": "toto6/my-php-app",
-  "description": "A PHP application on Heroku",
-  "require": {
-    "php": "^7.4 || ^8.0"
-  }
-}

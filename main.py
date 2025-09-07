@@ -2,13 +2,12 @@ import telebot
 from telebot import types
 import threading
 import time
-import os
 import random
 from firebase_init import *  # استدعاء كل دوال ومتغيرات Firebase
 
 # -------- إعدادات البوت --------
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
+BOT_TOKEN = "توكن_البوت_هنا"  # ضع توكن البوت
+OWNER_ID = 123456789  # ضع معرف المالك هنا
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # -------- متغيرات مساعدة --------
@@ -191,14 +190,13 @@ def next_exchange(call):
     if not completed_checks.get(key):
         bot.answer_callback_query(call.id, "❌ يجب التحقق من الاشتراك قبل الضغط التالي.")
         return
-    # إزالة الزوج الحالي من القوائم النشطة
+    # -------- إزالة الزوج الحالي من القوائم النشطة --------
     active_pairs.pop(user_id, None)
     active_pairs.pop(partner_id, None)
     completed_checks.pop(key, None)
     bot.answer_callback_query(call.id, "⏭ جاري اختيار قناة جديدة...")
     start_exchange(user_id)
 
-# -------- مراقبة المغادرة فعلية --------
 # -------- مراقبة المغادرة فعلية --------
 def monitor_leave():
     while True:
@@ -214,14 +212,12 @@ def monitor_leave():
                 user_channel = user_channels[0]
                 partner_channel = partner_channels[0]
 
-                # تحقق إذا غادر user القناة partner
                 try:
                     user_member = bot.get_chat_member(partner_channel, int(user_id))
                     user_in_partner = user_member.status in ["member", "creator", "administrator"]
                 except:
                     user_in_partner = False
 
-                # تحقق إذا غادر partner القناة user
                 try:
                     partner_member = bot.get_chat_member(user_channel, int(partner_id))
                     partner_in_user = partner_member.status in ["member", "creator", "administrator"]
@@ -241,6 +237,7 @@ def monitor_leave():
                     active_pairs.pop(user_id, None)
                     active_pairs.pop(partner_id, None)
                     completed_checks.pop(f"{user_id}_{partner_id}", None)
+
             except:
                 continue
         time.sleep(30)

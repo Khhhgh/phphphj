@@ -8,7 +8,7 @@ import time
 
 # -------- إعدادات البوت --------
 BOT_TOKEN = "7432842437:AAFfcMPNfHyB6JkwStp-_21pfewxyCmf01c"
-OWNER_ID = 123456789  # ضع هنا معرف مالك البوت
+OWNER_ID = 1310488710  # ضع هنا معرف مالك البوت
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # -------- قاعدة البيانات --------

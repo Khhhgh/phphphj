@@ -2,17 +2,24 @@ import telebot
 from telebot import types
 import threading
 import time
+import os
+import json
+import random
 import firebase_admin
 from firebase_admin import credentials, db
-import random
 
 # -------- إعدادات البوت --------
-BOT_TOKEN = "7432842437:AAFfcMPNfHyB6JkwStp-_21pfewxyCmf01c"
-OWNER_ID = 1310488710  # ضع هنا معرف المالك
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # ضع توكن البوت في Config Vars على Heroku
+OWNER_ID = int(os.environ.get("OWNER_ID", "0"))  # معرف المالك في Config Vars
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# -------- Firebase --------
-cred = credentials.Certificate("thaker-17eb6-firebase-adminsdk-fbsvc-fe85b964fe.json")
+# -------- Firebase من Config Vars --------
+cred_json = os.environ.get("FIREBASE_CRED")
+if not cred_json:
+    raise Exception("❌ لم يتم العثور على متغير البيئة FIREBASE_CRED")
+cred_dict = json.loads(cred_json)
+
+cred = credentials.Certificate(cred_dict)
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://thaker-17eb6-default-rtdb.firebaseio.com/'
 })
@@ -124,7 +131,7 @@ def receive_channel(message):
         add_channel(user_id, channel)
         user_add_channel.pop(message.chat.id)
         bot.send_message(message.chat.id, f"✅ تم إضافة قناتك: {channel}", reply_markup=main_menu(message.chat.id))
-
+        
 # -------- إضافة قناة إجبارية للمالك --------
 @bot.message_handler(func=lambda m: m.text == "إضافة قناة إجبارية" and m.chat.id == OWNER_ID)
 def add_mandatory_channel(message):
@@ -292,6 +299,6 @@ def monitor_leave():
 
 # تشغيل مراقبة المغادرة في خيط مستقل
 threading.Thread(target=monitor_leave, daemon=True).start()
-
+# -------- باقي وظائف البوت: قناة إجبارية، الاشتراك بالقنوات، التحقق، التالي، مراقبة المغادرة
 # -------- تشغيل البوت --------
 bot.infinity_polling()

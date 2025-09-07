@@ -174,7 +174,7 @@ def check_sub(c):
         if member.status not in ["member","creator","administrator"]:
             db.setdefault("banned",{})[uid] = time.time() + 900
             save_db()
-            bot.answer_callback_query(c.id,"❌ لم تشترك، تم حظرك لمدة 24 ساعة")
+            bot.answer_callback_query(c.id,"❌ لم تشترك، تم حظرك لمدة 15 دقيقه")
             with lock:
                 queue[:] = [x for x in queue if x != uid]
                 pid = active_pairs.pop(uid,None)
